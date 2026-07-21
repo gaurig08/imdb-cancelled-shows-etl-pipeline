@@ -1,7 +1,20 @@
-import pandas as pd
+"""
+ingest.py
+---------
+Extract step. Reads the three IMDb non-commercial datasets needed for
+this project. Download them from https://datasets.imdbws.com/ and
+place the unzipped .tsv files in data/:
+
+    data/title.basics.tsv
+    data/title.ratings.tsv
+    data/title.episode.tsv
+"""
+
 import os
+import pandas as pd
 
 DATA_PATH = "data/"
+
 
 def load_basics():
     print("Loading title basics...")
@@ -20,6 +33,7 @@ def load_basics():
     print(f"Found {len(df)} TV series")
     return df
 
+
 def load_ratings():
     print("Loading ratings...")
     df = pd.read_csv(
@@ -29,6 +43,7 @@ def load_ratings():
     )
     print(f"Found {len(df)} ratings")
     return df
+
 
 def load_episodes():
     print("Loading episodes...")
@@ -42,9 +57,10 @@ def load_episodes():
     print(f"Found {len(df)} episodes")
     return df
 
+
 if __name__ == "__main__":
     basics = load_basics()
     ratings = load_ratings()
     episodes = load_episodes()
-    print("\n✅ All data loaded successfully")
+    print("\nAll data loaded successfully")
     print(f"Series: {len(basics)} | Ratings: {len(ratings)} | Episodes: {len(episodes)}")
