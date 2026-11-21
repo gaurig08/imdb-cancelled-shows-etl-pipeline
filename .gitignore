@@ -1,7 +1,0 @@
-data/
-*.csv
-*.tsv
-__pycache__/
-.env
-venv/
-*.db
