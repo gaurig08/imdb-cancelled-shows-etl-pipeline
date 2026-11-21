@@ -1,120 +1,87 @@
-# IMDb Cancelled Shows ETL Pipeline
+# TV Show Cancellation Analytics Pipeline
 
-An end-to-end pipeline that analyzes 8,000+ IMDb TV shows to answer a
-specific question: **which genuinely good shows got cancelled too
-soon?** — and visualizes the pattern in Power BI.
+**Can you tell from season 1 that a TV show will end early?**
 
-## The question this answers
+A data pipeline that takes IMDb's public data (13M titles, 10M episodes), stores it in a
+cloud warehouse on AWS, checks its quality on every load, and shows the answers in a Tableau dashboard.
 
-Not "which shows ended" (most shows end eventually), but "which shows
-were rated 7.0+ on IMDb and still got cut within 3 seasons or fewer."
-That's the `is_cancelled` flag this pipeline builds — a proxy for
-shows that were cancelled despite being good, not because they were
-bad.
+![Dashboard](dashboard/tv_show_dashboard.png)
 
-## Data
+## The idea
 
-- **Source:** [IMDb non-commercial datasets](https://datasets.imdbws.com/)
-  — `title.basics.tsv`, `title.ratings.tsv`, `title.episode.tsv`
-  (not included in this repo due to size/license — download and
-  place in `data/` to run the pipeline yourself).
-- **Filters applied:** TV series only, 1,000+ votes, started in 2000
-  or later, has a rating.
-- **Scale:** 8,293 shows after filtering, 3,130 flagged as
-  cancelled-too-soon.
+Streaming teams (like Netflix's content team) ask two questions before backing a show:
+**which past shows is it like, and how did they do?** This project answers that with public IMDb data.
 
-## Pipeline architecture
+## What I found
 
-```
-IMDb .tsv files (data/)
-      │
-      ▼
- ingest.py           →  loads title basics, ratings, episodes
-      │
-      ▼
- transform.py        →  merges, filters, computes total_seasons/episodes,
-                          flags is_cancelled
-      │
-      ├───────────────► load.py            → optional: PostgreSQL star schema
-      │                                        (dim_genre + fact_shows)
-      │
-      └───────────────► export_powerbi.py  → writes powerbi/dim_genre.csv
-                                                and powerbi/fact_shows.csv
-                                                      │
-                                                      ▼
-                                              Power BI Desktop dashboard
+- **A weak pilot is the clearest warning sign.** Modern shows with short first seasons that ended
+  early had a median pilot rating of **7.2**, against **7.6** for long-running shows.
+- **8 in 10 thrillers and sci-fi shows ended early**, but fewer than 2 in 10 talk and game shows did.
+  Overall, 54% of shows ended early.
+- **Viewers dropping off during season 1 didn't predict anything.** That first looked like a signal,
+  but it disappeared once shows with similar season lengths were compared fairly.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[IMDb files] --> B[AWS S3<br/>raw files]
+    B --> C[Python in Colab<br/>clean + transform]
+    C --> D{Quality checks}
+    D -- pass --> E[(AWS RDS MySQL<br/>star schema)]
+    D -- fail --> F[Stop + log]
+    E --> G[SQL views] --> H[Tableau dashboard]
 ```
 
-## Tech stack
-
-| Layer | Tool |
+| Tool | What it does here |
 |---|---|
-| Extract / Transform | Python, Pandas |
-| Data warehouse (optional) | PostgreSQL |
-| Visualization | **Power BI** |
-| Orchestration | Plain Python (`pipeline.py`) |
-| SQL analysis (optional) | `analyze.sql` |
+| **AWS S3** | Keeps the original raw files, by date, so any run can be repeated |
+| **AWS RDS (MySQL)** | The data warehouse the dashboard reads from |
+| **Python (pandas)** | Cleans, labels and transforms the data |
+| **SQL** | Creates the tables, loads them safely, and prepares the dashboard data |
+| **Tableau** | The dashboard |
+
+## The data model
+
+A **star schema**: "fact" tables hold the numbers, "dimension" tables describe them.
+
+- `fact_episode`: one row per episode (rating, votes)
+- `fact_series_season`: one row per show per season
+- `dim_series`, `dim_genre`: the shows and their genres (a bridge table links them, since a show can have 3 genres)
+- `mart_comps`: each show's 10 most similar shows
+- `run_log`, `dq_results`: a record of every pipeline run and its quality checks
+
+## Data quality
+
+- Every load is checked first. If a serious check fails, nothing is loaded.
+- Bad rows are set aside in S3, not silently dropped (9 in v1).
+- Loads are **safe to repeat**: running the 985K-row load twice gave exactly the same tables.
+
+## How "ended early" was defined
+
+IMDb has no "cancelled" flag, so I defined it: **ended by 2025, with 2 seasons or fewer and 26 episodes
+or fewer.** It took three tries. The first rule wrongly flagged long anime (numbered as one season);
+the second wrongly flagged short-season streaming hits like Squid Game.
+
+## Limitations
+
+- No viewing data (it's private), so IMDb votes stand in for audience size.
+- "Ended early" includes some planned endings (e.g. Fleabag), not only cancellations.
+- Ratings are today's totals, not those at the time a show aired.
 
 ## How to run
 
-1. Download the three datasets from datasets.imdbws.com, unzip them,
-   and place them in `data/`.
-2. `pip install -r requirements.txt`
-3. `python pipeline.py`
+Open **[`TV_Project.ipynb`](TV_Project.ipynb)** in Google Colab and run the cells in order.
+You need an AWS S3 bucket and an RDS MySQL database. Passwords are typed in when asked,
+never saved.
 
-This produces:
-- `powerbi/dim_genre.csv` — one row per genre (dimension table)
-- `powerbi/fact_shows.csv` — one row per show (fact table)
+Data: [IMDb Non-Commercial Datasets](https://developer.imdb.com/non-commercial-datasets/) (personal, non-commercial use).
 
-Optional PostgreSQL path (for a live-connection Power BI demo):
-```bash
-python load.py
-psql shows_db < analyze.sql
-```
+## Next steps
 
-## Power BI dashboard
+- Run the pipeline automatically every week on AWS (Lambda, Glue, Step Functions)
+- Add automated tests
+- Improve the "similar shows" matching
 
-See **[POWERBI_GUIDE.md](POWERBI_GUIDE.md)** for exact steps.
+---
 
-Dashboard includes:
-- Cancellation rate by genre (bar chart)
-- Rating distribution: cancelled vs. survived (histogram)
-- Cancellation trend by decade
-- Average episode count: cancelled vs. survived
-- Genre and decade slicers
-
-## Project structure
-
-```
-├── data/                     # IMDb .tsv files (you provide these)
-├── powerbi/
-│   ├── dim_genre.csv          # generated
-│   └── fact_shows.csv         # generated
-├── ingest.py                    # extract
-├── transform.py                   # transform + is_cancelled logic
-├── load.py                          # optional PostgreSQL warehouse loader
-├── export_powerbi.py                  # Power BI CSV export
-├── pipeline.py                          # orchestrator
-├── analyze.sql                            # optional SQL analysis
-├── requirements.txt
-├── POWERBI_GUIDE.md
-├── INTERVIEW_QA.md
-└── README.md
-```
-
-## Skills demonstrated
-
-- ETL pipeline design (extract / transform / load, separated by concern)
-- Feature engineering (deriving a binary label from multiple raw fields)
-- Star-schema data modeling (fact + dimension tables)
-- SQL analytics (optional PostgreSQL path)
-- Power BI (data modeling, DAX, interactive dashboards)
-
-## Future improvements
-
-- Airflow orchestration for scheduled re-runs as IMDb updates its datasets
-- Incremental loading instead of full reload each run
-- An ML classifier predicting cancellation risk from early-season
-  ratings, instead of the current rule-based flag
-- Cloud deployment (e.g., the warehouse on RDS, Power BI Service for
-  scheduled refresh)
