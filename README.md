@@ -72,10 +72,7 @@ the second wrongly flagged short-season streaming hits like Squid Game.
 ## How to run
 
 Open **[`TV_Project.ipynb`](TV_Project.ipynb)** in Google Colab and run the cells in order.
-You need an AWS S3 bucket and an RDS MySQL database. Passwords are typed in when asked,
-never saved.
-
-Data: [IMDb Non-Commercial Datasets](https://developer.imdb.com/non-commercial-datasets/) (personal, non-commercial use).
+You need an AWS S3 bucket and an RDS MySQL database.
 
 ## Next steps
 
